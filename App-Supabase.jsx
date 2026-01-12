@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { User, Package, DollarSign, Users, Lock, Eye, EyeOff, Camera } from 'lucide-react';
+import { User, Package, DollarSign, Users, Lock, Eye, EyeOff, Camera, TrendingUp, AlertCircle, CheckCircle, XCircle } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 // Initialize Supabase client
-// TODO: Replace these with your actual Supabase project credentials
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://bobphuchnyzjqtuwvtaq.supabase.co';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJvYnBodWNobnl6anF0dXd2dGFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMzAxOTIsImV4cCI6MjA4MzgwNjE5Mn0.Jvlr3c3ghXu7MSqesbRcEkMvjlU4ORD_2xZuT62mHV0';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'YOUR_SUPABASE_URL';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'YOUR_SUPABASE_ANON_KEY';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 export default function GameSystem() {
@@ -15,6 +14,27 @@ export default function GameSystem() {
   const [userProfile, setUserProfile] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  
+  // Game stats
+  const [gameStats, setGameStats] = useState({
+    money: 0,
+    level: 1,
+    experience: 0,
+    workCooldown: 10,
+    crimeCooldown: 10,
+    crimeFailRate: 80,
+  });
+  
+  // Cooldown timers
+  const [cooldowns, setCooldowns] = useState({
+    work: null,
+    crime: null,
+    slut: null,
+  });
+  
+  // Notifications
+  const [notifications, setNotifications] = useState([]);
+  const [floatingMessages, setFloatingMessages] = useState([]);
   
   // Login form state
   const [loginData, setLoginData] = useState({ username: '', password: '' });
@@ -39,12 +59,30 @@ export default function GameSystem() {
     checkSession();
   }, []);
 
+  // Cooldown countdown effect
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCooldowns(prev => {
+        const newCooldowns = { ...prev };
+        Object.keys(newCooldowns).forEach(key => {
+          if (newCooldowns[key] > 0) {
+            newCooldowns[key]--;
+          }
+        });
+        return newCooldowns;
+      });
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, []);
+
   const checkSession = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
         setCurrentUser(session.user);
         await loadUserProfile(session.user.id);
+        await loadGameStats(session.user.id);
         setCurrentView('main');
       }
     } catch (err) {
@@ -69,13 +107,215 @@ export default function GameSystem() {
     }
   };
 
+  const loadGameStats = async (userId) => {
+    try {
+      const { data, error } = await supabase
+        .from('game_stats')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+      
+      if (error) {
+        // Create default stats if they don't exist
+        const { data: newStats, error: createError } = await supabase
+          .from('game_stats')
+          .insert([{
+            user_id: userId,
+            money: 0,
+            level: 1,
+            experience: 0,
+            work_cooldown: 10,
+            crime_cooldown: 10,
+            crime_fail_rate: 80
+          }])
+          .select()
+          .single();
+        
+        if (createError) throw createError;
+        setGameStats({
+          money: newStats.money,
+          level: newStats.level,
+          experience: newStats.experience,
+          workCooldown: newStats.work_cooldown,
+          crimeCooldown: newStats.crime_cooldown,
+          crimeFailRate: newStats.crime_fail_rate,
+        });
+      } else {
+        setGameStats({
+          money: data.money,
+          level: data.level,
+          experience: data.experience,
+          workCooldown: data.work_cooldown,
+          crimeCooldown: data.crime_cooldown,
+          crimeFailRate: data.crime_fail_rate,
+        });
+      }
+    } catch (err) {
+      console.error('Error loading game stats:', err);
+    }
+  };
+
+  const updateGameStats = async (updates) => {
+    try {
+      const { error } = await supabase
+        .from('game_stats')
+        .update({
+          money: updates.money,
+          level: updates.level,
+          experience: updates.experience,
+          work_cooldown: updates.workCooldown,
+          crime_cooldown: updates.crimeCooldown,
+          crime_fail_rate: updates.crimeFailRate,
+          updated_at: new Date().toISOString()
+        })
+        .eq('user_id', currentUser.id);
+      
+      if (error) throw error;
+      setGameStats(updates);
+    } catch (err) {
+      console.error('Error updating stats:', err);
+    }
+  };
+
+  const addNotification = (message, type = 'info') => {
+    const id = Date.now();
+    setNotifications(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    }, 3000);
+  };
+
+  const addFloatingMessage = (message, x, y) => {
+    const id = Date.now();
+    setFloatingMessages(prev => [...prev, { id, message, x, y }]);
+    setTimeout(() => {
+      setFloatingMessages(prev => prev.filter(m => m.id !== id));
+    }, 2000);
+  };
+
+  const handleBumWork = () => {
+    if (cooldowns.work > 0) {
+      addNotification(`Wait ${cooldowns.work}s before working again`, 'warning');
+      return;
+    }
+    
+    const payout = Math.floor(Math.random() * 10) + 1; // $1 to $10
+    const newMoney = gameStats.money + payout;
+    
+    updateGameStats({
+      ...gameStats,
+      money: newMoney,
+    });
+    
+    setCooldowns(prev => ({ ...prev, work: gameStats.workCooldown }));
+    addNotification(`Earned $${payout} from work!`, 'success');
+  };
+
+  const handleCrime = () => {
+    if (cooldowns.crime > 0) {
+      addNotification(`Wait ${cooldowns.crime}s before committing crime again`, 'warning');
+      return;
+    }
+    
+    const success = Math.random() * 100 > gameStats.crimeFailRate;
+    
+    if (success) {
+      const payout = Math.floor(Math.random() * 11) + 10; // $10 to $20
+      const newMoney = gameStats.money + payout;
+      
+      updateGameStats({
+        ...gameStats,
+        money: newMoney,
+      });
+      
+      addNotification(`Crime successful! Earned $${payout}`, 'success');
+    } else {
+      const loss = Math.floor(Math.random() * 11) + 10; // $10 to $20
+      const newMoney = Math.max(0, gameStats.money - loss);
+      
+      updateGameStats({
+        ...gameStats,
+        money: newMoney,
+      });
+      
+      addNotification(`Crime failed! Lost $${loss}`, 'error');
+    }
+    
+    setCooldowns(prev => ({ ...prev, crime: gameStats.crimeCooldown }));
+  };
+
+  const handleSlut = (e) => {
+    if (cooldowns.slut > 0) {
+      addNotification(`Wait ${cooldowns.slut}s before doing this again`, 'warning');
+      return;
+    }
+    
+    // Add "AYO!" floating message at click position
+    const rect = e.target.getBoundingClientRect();
+    addFloatingMessage('AYO!', rect.left + rect.width / 2, rect.top);
+    
+    const payout = Math.floor(Math.random() * 51) + 50; // $50 to $100
+    const newMoney = gameStats.money + payout;
+    
+    updateGameStats({
+      ...gameStats,
+      money: newMoney,
+    });
+    
+    setCooldowns(prev => ({ ...prev, slut: 60 }));
+    addNotification(`Earned $${payout}!`, 'success');
+  };
+
+  const upgradeWorkCooldown = () => {
+    if (gameStats.money < 500) {
+      addNotification('Need $500 to upgrade!', 'error');
+      return;
+    }
+    
+    if (gameStats.workCooldown <= 5) {
+      addNotification('Work cooldown is already at maximum!', 'warning');
+      return;
+    }
+    
+    const newCooldown = Math.max(5, gameStats.workCooldown - 0.1);
+    
+    updateGameStats({
+      ...gameStats,
+      money: gameStats.money - 500,
+      workCooldown: newCooldown,
+    });
+    
+    addNotification(`Work cooldown reduced to ${newCooldown.toFixed(1)}s!`, 'success');
+  };
+
+  const upgradeCrimeFailRate = () => {
+    if (gameStats.money < 500) {
+      addNotification('Need $500 to upgrade!', 'error');
+      return;
+    }
+    
+    if (gameStats.crimeFailRate <= 40) {
+      addNotification('Crime fail rate is already at minimum!', 'warning');
+      return;
+    }
+    
+    const newFailRate = Math.max(40, gameStats.crimeFailRate - 10);
+    
+    updateGameStats({
+      ...gameStats,
+      money: gameStats.money - 500,
+      crimeFailRate: newFailRate,
+    });
+    
+    addNotification(`Crime fail rate reduced to ${newFailRate}%!`, 'success');
+  };
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
     setIsLoading(true);
     
     try {
-      // Supabase uses email for auth, so we'll use username as email format
       const email = loginData.username.includes('@') ? loginData.username : `${loginData.username}@meetfighters.local`;
       
       const { data, error } = await supabase.auth.signInWithPassword({
@@ -87,6 +327,7 @@ export default function GameSystem() {
       
       setCurrentUser(data.user);
       await loadUserProfile(data.user.id);
+      await loadGameStats(data.user.id);
       setCurrentView('main');
       setLoginData({ username: '', password: '' });
     } catch (err) {
@@ -101,7 +342,6 @@ export default function GameSystem() {
     setError('');
     setIsLoading(true);
     
-    // Validation
     if (!regData.firstName || !regData.lastName || !regData.username || !regData.password) {
       setError('Please fill in all required fields');
       setIsLoading(false);
@@ -109,10 +349,8 @@ export default function GameSystem() {
     }
     
     try {
-      // Create email from username
       const email = regData.username.includes('@') ? regData.username : `${regData.username}@meetfighters.local`;
       
-      // Sign up with Supabase
       const { data, error } = await supabase.auth.signUp({
         email: email,
         password: regData.password,
@@ -127,7 +365,6 @@ export default function GameSystem() {
       
       if (error) throw error;
       
-      // Create profile in profiles table
       if (data.user) {
         const { error: profileError } = await supabase
           .from('profiles')
@@ -148,6 +385,7 @@ export default function GameSystem() {
         
         setCurrentUser(data.user);
         await loadUserProfile(data.user.id);
+        await loadGameStats(data.user.id);
         setCurrentView('main');
         setRegData({ firstName: '', lastName: '', username: '', password: '', email: '', height: '', weight: '', profilePhoto: null });
         setPhotoPreview(null);
@@ -471,14 +709,57 @@ export default function GameSystem() {
 
   return (
     <div className="min-h-screen bg-slate-950">
+      {/* Notifications */}
+      <div className="fixed top-4 right-4 z-50 space-y-2">
+        {notifications.map(notif => (
+          <div
+            key={notif.id}
+            className={`px-4 py-3 rounded-lg shadow-lg backdrop-blur-sm border flex items-center gap-2 animate-slideIn ${
+              notif.type === 'success' ? 'bg-green-500/20 border-green-500/50 text-green-400' :
+              notif.type === 'error' ? 'bg-red-500/20 border-red-500/50 text-red-400' :
+              notif.type === 'warning' ? 'bg-yellow-500/20 border-yellow-500/50 text-yellow-400' :
+              'bg-blue-500/20 border-blue-500/50 text-blue-400'
+            }`}
+          >
+            {notif.type === 'success' && <CheckCircle size={20} />}
+            {notif.type === 'error' && <XCircle size={20} />}
+            {notif.type === 'warning' && <AlertCircle size={20} />}
+            <span>{notif.message}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Floating Messages */}
+      {floatingMessages.map(msg => (
+        <div
+          key={msg.id}
+          className="fixed text-4xl font-bold text-yellow-400 animate-floatUp pointer-events-none z-50"
+          style={{
+            left: msg.x,
+            top: msg.y,
+            transform: 'translate(-50%, -50%)',
+            textShadow: '0 0 20px rgba(251, 191, 36, 0.5)',
+            fontFamily: 'Orbitron, monospace'
+          }}
+        >
+          {msg.message}
+        </div>
+      ))}
+      
       {/* Header */}
-      <div className="bg-slate-900/80 backdrop-blur-md border-b border-slate-800 sticky top-0 z-50">
+      <div className="bg-slate-900/80 backdrop-blur-md border-b border-slate-800 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
           <h1 className="text-2xl font-bold bg-gradient-to-r from-yellow-400 to-yellow-500 bg-clip-text text-transparent" style={{ fontFamily: 'Orbitron, monospace' }}>
             MEETFIGHTERSmmo
           </h1>
           
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-6">
+            {/* Money Display */}
+            <div className="bg-green-500/10 border border-green-500/30 rounded-lg px-4 py-2">
+              <div className="text-green-400 text-sm">Money</div>
+              <div className="text-white text-xl font-bold">${gameStats.money.toFixed(2)}</div>
+            </div>
+            
             <div className="flex items-center gap-3">
               {userProfile?.profile_photo && (
                 <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-yellow-500">
@@ -571,15 +852,15 @@ export default function GameSystem() {
               <div className="grid grid-cols-3 gap-4">
                 <div className="bg-gradient-to-br from-yellow-500/10 to-yellow-600/10 border border-yellow-500/20 rounded-lg p-4">
                   <div className="text-yellow-400 text-sm">Level</div>
-                  <div className="text-white text-2xl font-bold">1</div>
+                  <div className="text-white text-2xl font-bold">{gameStats.level}</div>
                 </div>
                 <div className="bg-gradient-to-br from-green-500/10 to-emerald-500/10 border border-green-500/20 rounded-lg p-4">
                   <div className="text-green-400 text-sm">Money</div>
-                  <div className="text-white text-2xl font-bold">$0</div>
+                  <div className="text-white text-2xl font-bold">${gameStats.money.toFixed(2)}</div>
                 </div>
                 <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/10 border border-purple-500/20 rounded-lg p-4">
-                  <div className="text-purple-400 text-sm">Items</div>
-                  <div className="text-white text-2xl font-bold">0</div>
+                  <div className="text-purple-400 text-sm">Experience</div>
+                  <div className="text-white text-2xl font-bold">{gameStats.experience}</div>
                 </div>
               </div>
             </div>
@@ -604,36 +885,104 @@ export default function GameSystem() {
             <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-6">
               <h2 className="text-2xl font-bold text-white mb-6">Activities</h2>
               
-              <div className="grid gap-4">
-                <button className="bg-gradient-to-r from-green-500/10 to-emerald-500/10 border border-green-500/30 hover:border-green-500 rounded-xl p-6 text-left transition-all group">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-xl font-bold text-green-400 mb-2">Work</h3>
-                      <p className="text-slate-400">Earn money through legitimate means</p>
+              <div className="grid gap-6">
+                {/* Bum Work */}
+                <div className="bg-gradient-to-r from-green-500/10 to-emerald-500/10 border border-green-500/30 rounded-xl p-6">
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex-1">
+                      <h3 className="text-2xl font-bold text-green-400 mb-2">Bum Work</h3>
+                      <p className="text-slate-400 mb-3">Work without any training or job experience</p>
+                      <div className="space-y-1 text-sm">
+                        <p className="text-slate-300">💰 Payout: $1 - $10</p>
+                        <p className="text-slate-300">⏱️ Cooldown: {gameStats.workCooldown.toFixed(1)}s {gameStats.workCooldown > 5 && '(upgradable to 5.0s)'}</p>
+                      </div>
                     </div>
-                    <DollarSign size={32} className="text-green-400 group-hover:scale-110 transition-transform" />
+                    <DollarSign size={48} className="text-green-400" />
                   </div>
-                </button>
+                  
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleBumWork}
+                      disabled={cooldowns.work > 0}
+                      className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-slate-700 text-white font-bold py-3 rounded-lg transition-all disabled:cursor-not-allowed"
+                    >
+                      {cooldowns.work > 0 ? `Wait ${cooldowns.work}s` : 'WORK'}
+                    </button>
+                    
+                    {gameStats.workCooldown > 5 && (
+                      <button
+                        onClick={upgradeWorkCooldown}
+                        disabled={gameStats.money < 500}
+                        className="px-6 bg-yellow-600 hover:bg-yellow-700 disabled:bg-slate-700 disabled:text-slate-500 text-white font-bold py-3 rounded-lg transition-all disabled:cursor-not-allowed flex items-center gap-2"
+                      >
+                        <TrendingUp size={20} />
+                        Upgrade ($500)
+                      </button>
+                    )}
+                  </div>
+                </div>
                 
-                <button className="bg-gradient-to-r from-red-500/10 to-orange-500/10 border border-red-500/30 hover:border-red-500 rounded-xl p-6 text-left transition-all group">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-xl font-bold text-red-400 mb-2">Crime</h3>
-                      <p className="text-slate-400">High risk, high reward activities</p>
+                {/* Crime */}
+                <div className="bg-gradient-to-r from-red-500/10 to-orange-500/10 border border-red-500/30 rounded-xl p-6">
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex-1">
+                      <h3 className="text-2xl font-bold text-red-400 mb-2">Crime</h3>
+                      <p className="text-slate-400 mb-3">Lie, Cheat, and Steal</p>
+                      <div className="space-y-1 text-sm">
+                        <p className="text-slate-300">💰 Payout: $10 - $20 (on success)</p>
+                        <p className="text-slate-300">💸 Loss: $10 - $20 (on fail)</p>
+                        <p className="text-slate-300">🎲 Success Rate: {100 - gameStats.crimeFailRate}% {gameStats.crimeFailRate > 40 && '(upgradable to 60%)'}</p>
+                        <p className="text-slate-300">⏱️ Cooldown: {gameStats.crimeCooldown}s</p>
+                      </div>
                     </div>
-                    <Users size={32} className="text-red-400 group-hover:scale-110 transition-transform" />
+                    <Users size={48} className="text-red-400" />
                   </div>
-                </button>
+                  
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleCrime}
+                      disabled={cooldowns.crime > 0}
+                      className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-slate-700 text-white font-bold py-3 rounded-lg transition-all disabled:cursor-not-allowed"
+                    >
+                      {cooldowns.crime > 0 ? `Wait ${cooldowns.crime}s` : 'COMMIT CRIME'}
+                    </button>
+                    
+                    {gameStats.crimeFailRate > 40 && (
+                      <button
+                        onClick={upgradeCrimeFailRate}
+                        disabled={gameStats.money < 500}
+                        className="px-6 bg-yellow-600 hover:bg-yellow-700 disabled:bg-slate-700 disabled:text-slate-500 text-white font-bold py-3 rounded-lg transition-all disabled:cursor-not-allowed flex items-center gap-2"
+                      >
+                        <TrendingUp size={20} />
+                        Upgrade ($500)
+                      </button>
+                    )}
+                  </div>
+                </div>
                 
-                <button className="bg-gradient-to-r from-pink-500/10 to-purple-500/10 border border-pink-500/30 hover:border-pink-500 rounded-xl p-6 text-left transition-all group">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-xl font-bold text-pink-400 mb-2">Slut</h3>
-                      <p className="text-slate-400">Adult entertainment activities</p>
+                {/* Slut */}
+                <div className="bg-gradient-to-r from-pink-500/10 to-purple-500/10 border border-pink-500/30 rounded-xl p-6">
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex-1">
+                      <h3 className="text-2xl font-bold text-pink-400 mb-2">Slut</h3>
+                      <p className="text-slate-400 mb-3">Be "various" and "fun"</p>
+                      <div className="space-y-1 text-sm">
+                        <p className="text-slate-300">💰 Payout: $50 - $100</p>
+                        <p className="text-slate-300">⏱️ Cooldown: 60s</p>
+                        <p className="text-slate-300">🚫 No upgrades available</p>
+                      </div>
                     </div>
-                    <User size={32} className="text-pink-400 group-hover:scale-110 transition-transform" />
+                    <User size={48} className="text-pink-400" />
                   </div>
-                </button>
+                  
+                  <button
+                    onClick={handleSlut}
+                    disabled={cooldowns.slut > 0}
+                    className="w-full bg-pink-600 hover:bg-pink-700 disabled:bg-slate-700 text-white font-bold py-3 rounded-lg transition-all disabled:cursor-not-allowed"
+                  >
+                    {cooldowns.slut > 0 ? `Wait ${cooldowns.slut}s` : 'DO THE THING'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -648,8 +997,32 @@ export default function GameSystem() {
           to { opacity: 1; }
         }
         
+        @keyframes slideIn {
+          from { opacity: 0; transform: translateX(100px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+        
+        @keyframes floatUp {
+          from { 
+            opacity: 1; 
+            transform: translate(-50%, -50%);
+          }
+          to { 
+            opacity: 0; 
+            transform: translate(-50%, -200px);
+          }
+        }
+        
         .animate-fadeIn {
           animation: fadeIn 0.4s ease-out;
+        }
+        
+        .animate-slideIn {
+          animation: slideIn 0.3s ease-out;
+        }
+        
+        .animate-floatUp {
+          animation: floatUp 2s ease-out forwards;
         }
       `}</style>
     </div>
