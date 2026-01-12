@@ -4,8 +4,8 @@ import { createClient } from '@supabase/supabase-js';
 
 // Initialize Supabase client
 // TODO: Replace these with your actual Supabase project credentials
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'YOUR_SUPABASE_URL';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'YOUR_SUPABASE_ANON_KEY';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://bobphuchnyzjqtuwvtaq.supabase.co';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJvYnBodWNobnl6anF0dXd2dGFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMzAxOTIsImV4cCI6MjA4MzgwNjE5Mn0.Jvlr3c3ghXu7MSqesbRcEkMvjlU4ORD_2xZuT62mHV0';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 export default function GameSystem() {
