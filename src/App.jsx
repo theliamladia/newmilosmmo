@@ -30,20 +30,20 @@ export default function GameSystem() {
     loadUsers();
   }, []);
 
-  const loadUsers = async () => {
+  const loadUsers = () => {
     try {
-      const result = await window.storage.get('game-users');
-      if (result && result.value) {
-        setUsers(JSON.parse(result.value));
+      const stored = localStorage.getItem('game-users');
+      if (stored) {
+        setUsers(JSON.parse(stored));
       }
     } catch (err) {
       console.log('No users found yet');
     }
   };
 
-  const saveUsers = async (userList) => {
+  const saveUsers = (userList) => {
     try {
-      await window.storage.set('game-users', JSON.stringify(userList));
+      localStorage.setItem('game-users', JSON.stringify(userList));
     } catch (err) {
       console.error('Failed to save users:', err);
     }

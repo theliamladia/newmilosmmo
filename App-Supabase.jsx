@@ -1,12 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { User, Package, DollarSign, Users, Lock, Eye, EyeOff, Camera } from 'lucide-react';
+import { createClient } from '@supabase/supabase-js';
+
+// Initialize Supabase client
+// TODO: Replace these with your actual Supabase project credentials
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'YOUR_SUPABASE_URL';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'YOUR_SUPABASE_ANON_KEY';
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 export default function GameSystem() {
   const [currentView, setCurrentView] = useState('login');
   const [currentTab, setCurrentTab] = useState('home');
-  const [users, setUsers] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
+  const [userProfile, setUserProfile] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   
   // Login form state
   const [loginData, setLoginData] = useState({ username: '', password: '' });
@@ -17,6 +25,7 @@ export default function GameSystem() {
     lastName: '',
     username: '',
     password: '',
+    email: '',
     height: '',
     weight: '',
     profilePhoto: null
@@ -25,80 +34,129 @@ export default function GameSystem() {
   const [error, setError] = useState('');
   const [photoPreview, setPhotoPreview] = useState(null);
 
-  // Load users from storage on mount
+  // Check for existing session on mount
   useEffect(() => {
-    loadUsers();
+    checkSession();
   }, []);
 
-  const loadUsers = async () => {
+  const checkSession = async () => {
     try {
-      const result = await window.storage.get('game-users');
-      if (result && result.value) {
-        setUsers(JSON.parse(result.value));
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        setCurrentUser(session.user);
+        await loadUserProfile(session.user.id);
+        setCurrentView('main');
       }
     } catch (err) {
-      console.log('No users found yet');
+      console.error('Session check error:', err);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const saveUsers = async (userList) => {
+  const loadUserProfile = async (userId) => {
     try {
-      await window.storage.set('game-users', JSON.stringify(userList));
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+      
+      if (error) throw error;
+      setUserProfile(data);
     } catch (err) {
-      console.error('Failed to save users:', err);
+      console.error('Error loading profile:', err);
     }
   };
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
+    setIsLoading(true);
     
-    const user = users.find(u => u.username === loginData.username && u.password === loginData.password);
-    
-    if (user) {
-      setCurrentUser(user);
+    try {
+      // Supabase uses email for auth, so we'll use username as email format
+      const email = loginData.username.includes('@') ? loginData.username : `${loginData.username}@meetfighters.local`;
+      
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email,
+        password: loginData.password,
+      });
+      
+      if (error) throw error;
+      
+      setCurrentUser(data.user);
+      await loadUserProfile(data.user.id);
       setCurrentView('main');
       setLoginData({ username: '', password: '' });
-    } else {
-      setError('Invalid username or password');
+    } catch (err) {
+      setError(err.message || 'Invalid username or password');
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const handleRegister = (e) => {
+  const handleRegister = async (e) => {
     e.preventDefault();
     setError('');
+    setIsLoading(true);
     
     // Validation
     if (!regData.firstName || !regData.lastName || !regData.username || !regData.password) {
       setError('Please fill in all required fields');
+      setIsLoading(false);
       return;
     }
     
-    if (users.some(u => u.username === regData.username)) {
-      setError('Username already exists');
-      return;
+    try {
+      // Create email from username
+      const email = regData.username.includes('@') ? regData.username : `${regData.username}@meetfighters.local`;
+      
+      // Sign up with Supabase
+      const { data, error } = await supabase.auth.signUp({
+        email: email,
+        password: regData.password,
+        options: {
+          data: {
+            username: regData.username,
+            first_name: regData.firstName,
+            last_name: regData.lastName,
+          }
+        }
+      });
+      
+      if (error) throw error;
+      
+      // Create profile in profiles table
+      if (data.user) {
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .insert([
+            {
+              id: data.user.id,
+              username: regData.username,
+              first_name: regData.firstName,
+              last_name: regData.lastName,
+              height: regData.height,
+              weight: regData.weight,
+              profile_photo: photoPreview,
+              created_at: new Date().toISOString()
+            }
+          ]);
+        
+        if (profileError) throw profileError;
+        
+        setCurrentUser(data.user);
+        await loadUserProfile(data.user.id);
+        setCurrentView('main');
+        setRegData({ firstName: '', lastName: '', username: '', password: '', email: '', height: '', weight: '', profilePhoto: null });
+        setPhotoPreview(null);
+      }
+    } catch (err) {
+      setError(err.message || 'Registration failed');
+    } finally {
+      setIsLoading(false);
     }
-    
-    const newUser = {
-      id: Date.now().toString(),
-      firstName: regData.firstName,
-      lastName: regData.lastName,
-      username: regData.username,
-      password: regData.password,
-      height: regData.height,
-      weight: regData.weight,
-      profilePhoto: photoPreview,
-      createdAt: new Date().toISOString()
-    };
-    
-    const updatedUsers = [...users, newUser];
-    setUsers(updatedUsers);
-    saveUsers(updatedUsers);
-    
-    setCurrentUser(newUser);
-    setCurrentView('main');
-    setRegData({ firstName: '', lastName: '', username: '', password: '', height: '', weight: '', profilePhoto: null });
-    setPhotoPreview(null);
   };
 
   const handlePhotoUpload = (e) => {
@@ -112,11 +170,28 @@ export default function GameSystem() {
     }
   };
 
-  const handleLogout = () => {
-    setCurrentUser(null);
-    setCurrentView('login');
-    setCurrentTab('home');
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+      setCurrentUser(null);
+      setUserProfile(null);
+      setCurrentView('login');
+      setCurrentTab('home');
+    } catch (err) {
+      console.error('Logout error:', err);
+    }
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-yellow-400 mx-auto mb-4"></div>
+          <p className="text-slate-400">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (currentView === 'login') {
     return (
@@ -132,13 +207,14 @@ export default function GameSystem() {
           <div className="bg-slate-900/50 backdrop-blur-xl border border-slate-800 rounded-2xl p-8 shadow-2xl animate-slideUp">
             <form onSubmit={handleLogin} className="space-y-5">
               <div>
-                <label className="block text-slate-300 text-sm font-medium mb-2">Username</label>
+                <label className="block text-slate-300 text-sm font-medium mb-2">Username or Email</label>
                 <input
                   type="text"
                   value={loginData.username}
                   onChange={(e) => setLoginData({...loginData, username: e.target.value})}
                   className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-yellow-500 focus:ring-2 focus:ring-yellow-500/20 transition-all"
-                  placeholder="Enter username"
+                  placeholder="Enter username or email"
+                  disabled={isLoading}
                 />
               </div>
               
@@ -151,6 +227,7 @@ export default function GameSystem() {
                     onChange={(e) => setLoginData({...loginData, password: e.target.value})}
                     className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-yellow-500 focus:ring-2 focus:ring-yellow-500/20 transition-all"
                     placeholder="Enter password"
+                    disabled={isLoading}
                   />
                   <button
                     type="button"
@@ -170,9 +247,10 @@ export default function GameSystem() {
               
               <button
                 type="submit"
-                className="w-full bg-gradient-to-r from-yellow-500 to-yellow-600 text-white font-semibold py-3 rounded-lg hover:from-yellow-600 hover:to-yellow-700 transition-all duration-200 shadow-lg shadow-yellow-500/20"
+                disabled={isLoading}
+                className="w-full bg-gradient-to-r from-yellow-500 to-yellow-600 text-white font-semibold py-3 rounded-lg hover:from-yellow-600 hover:to-yellow-700 transition-all duration-200 shadow-lg shadow-yellow-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                LOGIN
+                {isLoading ? 'LOGGING IN...' : 'LOGIN'}
               </button>
               
               <div className="text-center">
@@ -180,6 +258,7 @@ export default function GameSystem() {
                   type="button"
                   onClick={() => setCurrentView('register')}
                   className="text-yellow-400 hover:text-yellow-300 text-sm transition-colors"
+                  disabled={isLoading}
                 >
                   Don't have an account? <span className="font-semibold">Create one</span>
                 </button>
@@ -235,6 +314,7 @@ export default function GameSystem() {
                     onChange={(e) => setRegData({...regData, firstName: e.target.value})}
                     className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-yellow-500 focus:ring-2 focus:ring-yellow-500/20 transition-all"
                     placeholder="John"
+                    disabled={isLoading}
                   />
                 </div>
                 
@@ -246,6 +326,7 @@ export default function GameSystem() {
                     onChange={(e) => setRegData({...regData, lastName: e.target.value})}
                     className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-yellow-500 focus:ring-2 focus:ring-yellow-500/20 transition-all"
                     placeholder="Doe"
+                    disabled={isLoading}
                   />
                 </div>
               </div>
@@ -258,6 +339,7 @@ export default function GameSystem() {
                   onChange={(e) => setRegData({...regData, username: e.target.value})}
                   className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-yellow-500 focus:ring-2 focus:ring-yellow-500/20 transition-all"
                   placeholder="Choose a username"
+                  disabled={isLoading}
                 />
               </div>
               
@@ -269,7 +351,8 @@ export default function GameSystem() {
                     value={regData.password}
                     onChange={(e) => setRegData({...regData, password: e.target.value})}
                     className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-yellow-500 focus:ring-2 focus:ring-yellow-500/20 transition-all"
-                    placeholder="Create a password"
+                    placeholder="Create a password (min 6 characters)"
+                    disabled={isLoading}
                   />
                   <button
                     type="button"
@@ -290,6 +373,7 @@ export default function GameSystem() {
                     onChange={(e) => setRegData({...regData, height: e.target.value})}
                     className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-yellow-500 focus:ring-2 focus:ring-yellow-500/20 transition-all"
                     placeholder="5'10&quot;"
+                    disabled={isLoading}
                   />
                 </div>
                 
@@ -301,6 +385,7 @@ export default function GameSystem() {
                     onChange={(e) => setRegData({...regData, weight: e.target.value})}
                     className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-yellow-500 focus:ring-2 focus:ring-yellow-500/20 transition-all"
                     placeholder="160 lbs"
+                    disabled={isLoading}
                   />
                 </div>
               </div>
@@ -323,6 +408,7 @@ export default function GameSystem() {
                       accept="image/*"
                       onChange={handlePhotoUpload}
                       className="hidden"
+                      disabled={isLoading}
                     />
                   </label>
                 </div>
@@ -341,15 +427,17 @@ export default function GameSystem() {
                     setCurrentView('login');
                     setError('');
                   }}
-                  className="flex-1 bg-slate-800 text-slate-300 font-semibold py-3 rounded-lg hover:bg-slate-700 transition-all duration-200"
+                  disabled={isLoading}
+                  className="flex-1 bg-slate-800 text-slate-300 font-semibold py-3 rounded-lg hover:bg-slate-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   BACK
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 bg-gradient-to-r from-yellow-500 to-yellow-600 text-white font-semibold py-3 rounded-lg hover:from-yellow-600 hover:to-yellow-700 transition-all duration-200 shadow-lg shadow-yellow-500/20"
+                  disabled={isLoading}
+                  className="flex-1 bg-gradient-to-r from-yellow-500 to-yellow-600 text-white font-semibold py-3 rounded-lg hover:from-yellow-600 hover:to-yellow-700 transition-all duration-200 shadow-lg shadow-yellow-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  CREATE ACCOUNT
+                  {isLoading ? 'CREATING...' : 'CREATE ACCOUNT'}
                 </button>
               </div>
             </form>
@@ -392,14 +480,14 @@ export default function GameSystem() {
           
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-3">
-              {currentUser.profilePhoto && (
+              {userProfile?.profile_photo && (
                 <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-yellow-500">
-                  <img src={currentUser.profilePhoto} alt="Profile" className="w-full h-full object-cover" />
+                  <img src={userProfile.profile_photo} alt="Profile" className="w-full h-full object-cover" />
                 </div>
               )}
               <div className="text-right">
-                <div className="text-white font-semibold">{currentUser.firstName} {currentUser.lastName}</div>
-                <div className="text-slate-400 text-xs">@{currentUser.username}</div>
+                <div className="text-white font-semibold">{userProfile?.first_name} {userProfile?.last_name}</div>
+                <div className="text-slate-400 text-xs">@{userProfile?.username}</div>
               </div>
             </div>
             <button
@@ -461,18 +549,18 @@ export default function GameSystem() {
         {currentTab === 'home' && (
           <div className="space-y-6 animate-fadeIn">
             <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-6">
-              <h2 className="text-2xl font-bold text-white mb-4">Welcome Back, {currentUser.firstName}!</h2>
+              <h2 className="text-2xl font-bold text-white mb-4">Welcome Back, {userProfile?.first_name}!</h2>
               <div className="grid grid-cols-2 gap-4">
-                {currentUser.height && (
+                {userProfile?.height && (
                   <div className="bg-slate-800/50 rounded-lg p-4">
                     <div className="text-slate-400 text-sm">Height</div>
-                    <div className="text-white text-lg font-semibold">{currentUser.height}</div>
+                    <div className="text-white text-lg font-semibold">{userProfile.height}</div>
                   </div>
                 )}
-                {currentUser.weight && (
+                {userProfile?.weight && (
                   <div className="bg-slate-800/50 rounded-lg p-4">
                     <div className="text-slate-400 text-sm">Weight</div>
-                    <div className="text-white text-lg font-semibold">{currentUser.weight}</div>
+                    <div className="text-white text-lg font-semibold">{userProfile.weight}</div>
                   </div>
                 )}
               </div>
